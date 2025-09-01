@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
-import { ChatMessage, NewsHeadline } from '../types';
+import { ChatMessage, NewsHeadline, SearchResult } from '../types';
 import { Message } from './Message';
-import { NewsIcon } from './icons';
+import { NewsIcon, SearchIcon } from './icons';
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -9,6 +9,10 @@ interface ChatAreaProps {
   newsHeadlines?: NewsHeadline[];
   showNewsSelector?: boolean;
   onNewsSelect?: (headline: NewsHeadline) => void;
+  isSearching?: boolean;
+  searchResults?: SearchResult[];
+  showSearchResults?: boolean;
+  onSearchResultSelect?: (result: SearchResult) => void;
 }
 
 const TypingIndicator: React.FC = () => (
@@ -63,13 +67,73 @@ const NewsSelector: React.FC<{
     </div>
 );
 
+const SearchIndicator: React.FC = () => (
+    <div className="my-4 p-4 bg-blue-100/50 rounded-lg">
+        <div className="flex items-center justify-center">
+            <SearchIcon className="w-5 h-5 mr-2 text-blue-600 animate-pulse" />
+            <p className="text-blue-700">ウェブで情報を検索中...</p>
+        </div>
+    </div>
+);
 
-export const ChatArea: React.FC<ChatAreaProps> = ({ messages, isLoading, newsHeadlines = [], showNewsSelector = false, onNewsSelect = () => {} }) => {
+const SearchResultSelector: React.FC<{
+    results: SearchResult[];
+    onSelect: (result: SearchResult) => void;
+}> = ({ results, onSelect }) => (
+    <div className="my-4 p-4 bg-blue-200/50 rounded-lg">
+        <h2 className="text-lg font-bold text-blue-700 mb-3 text-center">検索結果から話題を選んでください</h2>
+        <div className="w-full max-w-2xl mx-auto space-y-3">
+            {results.map((result, index) => (
+                <button
+                    key={index}
+                    onClick={() => onSelect(result)}
+                    className="w-full text-left p-4 bg-white rounded-lg shadow-md hover:shadow-lg hover:bg-blue-50 border border-transparent hover:border-blue-300 transition-all transform hover:-translate-y-1 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    aria-label={`Select search result: ${result.title}`}
+                >
+                    <div className="flex items-start">
+                        <SearchIcon className="w-5 h-5 mr-3 mt-0.5 flex-shrink-0 text-blue-600" />
+                        <div className="flex-grow">
+                            <h3 className="font-bold text-blue-800 text-base mb-1">
+                                {result.japaneseTitle || result.title}
+                            </h3>
+                            {result.japaneseTitle && (
+                                <p className="text-sm text-gray-500 font-light mb-2">
+                                    {result.title}
+                                </p>
+                            )}
+                            <p className="text-sm text-gray-700 font-light">
+                                {result.japaneseSnippet || result.snippet}
+                            </p>
+                            {result.japaneseSnippet && (
+                                <p className="text-xs text-gray-500 font-light mt-1">
+                                    {result.snippet}
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                </button>
+            ))}
+        </div>
+    </div>
+);
+
+
+export const ChatArea: React.FC<ChatAreaProps> = ({ 
+    messages, 
+    isLoading, 
+    newsHeadlines = [], 
+    showNewsSelector = false, 
+    onNewsSelect = () => {},
+    isSearching = false,
+    searchResults = [],
+    showSearchResults = false,
+    onSearchResultSelect = () => {}
+}) => {
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading, showNewsSelector]);
+  }, [messages, isLoading, showNewsSelector, isSearching, showSearchResults]);
 
   if (messages.length === 0 && isLoading) {
     return (
@@ -88,6 +152,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ messages, isLoading, newsHea
                     <Message key={msg.id} message={msg} />
                 ))}
                 {isLoading && messages.length > 0 && <TypingIndicator />}
+                {isSearching && <SearchIndicator />}
+                {showSearchResults && searchResults.length > 0 && (
+                    <SearchResultSelector results={searchResults} onSelect={onSearchResultSelect} />
+                )}
                 {showNewsSelector && newsHeadlines.length > 0 && (
                     <NewsSelector headlines={newsHeadlines} onSelect={onNewsSelect} />
                 )}

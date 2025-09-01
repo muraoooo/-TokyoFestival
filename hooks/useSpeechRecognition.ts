@@ -69,8 +69,10 @@ interface UseSpeechRecognitionOptions {
 export const useSpeechRecognition = ({ lang }: UseSpeechRecognitionOptions) => {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState('');
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!SpeechRecognitionAPI) {
@@ -79,17 +81,41 @@ export const useSpeechRecognition = ({ lang }: UseSpeechRecognitionOptions) => {
     }
 
     const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = false;
+    recognition.continuous = true; // 継続的に聞き取る
     recognition.lang = lang;
-    recognition.interimResults = false;
+    recognition.interimResults = true; // 途中経過も表示
     recognitionRef.current = recognition;
 
     const handleResult = (event: Event) => {
         const speechEvent = event as SpeechRecognitionEvent;
-        const lastResult = speechEvent.results[speechEvent.results.length - 1];
-        if (lastResult.isFinal) {
-            setTranscript(lastResult[0].transcript.trim());
+        let interimText = '';
+        let finalText = '';
+        
+        for (let i = speechEvent.resultIndex; i < speechEvent.results.length; i++) {
+            const result = speechEvent.results[i];
+            if (result.isFinal) {
+                finalText += result[0].transcript;
+            } else {
+                interimText += result[0].transcript;
+            }
         }
+        
+        if (finalText) {
+            setTranscript(prev => prev + (prev ? ' ' : '') + finalText.trim());
+            setInterimTranscript('');
+        } else {
+            setInterimTranscript(interimText);
+        }
+        
+        // 話し終わったら0.8秒後に自動的に認識を終了
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+        }
+        timeoutRef.current = setTimeout(() => {
+            if (recognitionRef.current && isListening) {
+                recognitionRef.current.stop();
+            }
+        }, 800);
     };
     
     const handleError = (event: Event) => {
@@ -107,6 +133,9 @@ export const useSpeechRecognition = ({ lang }: UseSpeechRecognitionOptions) => {
 
     const handleEnd = () => {
         setIsListening(false);
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+        }
     };
 
     recognition.addEventListener('result', handleResult);
@@ -118,8 +147,11 @@ export const useSpeechRecognition = ({ lang }: UseSpeechRecognitionOptions) => {
         recognition.removeEventListener('error', handleError);
         recognition.removeEventListener('end', handleEnd);
         recognition.abort();
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+        }
     };
-  }, [lang]);
+  }, [lang, isListening]);
 
   const startListening = useCallback(() => {
     if (recognitionRef.current && !isListening) {
@@ -144,11 +176,13 @@ export const useSpeechRecognition = ({ lang }: UseSpeechRecognitionOptions) => {
 
   const resetTranscript = useCallback(() => {
     setTranscript('');
+    setInterimTranscript('');
   }, []);
   
   return {
       isListening,
       transcript,
+      interimTranscript,
       error,
       startListening,
       stopListening,

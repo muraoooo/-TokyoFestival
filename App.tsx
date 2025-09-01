@@ -2,8 +2,8 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { ChatArea } from './components/ChatArea';
 import { VoiceInput } from './components/VoiceInput';
 import { Translator } from './components/Translator';
-import { ChatMessage, MessageSender, NewsHeadline } from './types';
-import { getAIResponse, getNewsHeadlines, getGreetingForSelectedNews, getInitialGreeting } from './services/geminiService';
+import { ChatMessage, MessageSender, NewsHeadline, SearchResult } from './types';
+import { getAIResponse, getNewsHeadlines, getGreetingForSelectedNews, getInitialGreeting, getWebSearchResults, getGreetingForSearchResult } from './services/geminiService';
 
 const personalityOptions = [
   { value: 'standard', label: 'フレンドリー（標準）' },
@@ -15,11 +15,11 @@ const personalityOptions = [
 ];
 
 const topicOptions = [
-  { value: 'world', label: 'World & Politics（世界・政治）' },
-  { value: 'business', label: 'Business & Economy（ビジネス・経済）' },
-  { value: 'science', label: 'Science & Technology（科学・テクノロジー）' },
-  { value: 'culture', label: 'Culture & Lifestyle（文化・生活）' },
-  { value: 'human', label: 'Human Stories & Others（人間ドラマ・その他）' },
+  { value: 'world', label: '世界・政治' },
+  { value: 'business', label: 'ビジネス・経済' },
+  { value: 'science', label: '科学・テクノロジー' },
+  { value: 'culture', label: '文化・生活' },
+  { value: 'human', label: '人間ドラマ・その他' },
 ];
 
 export default function App() {
@@ -29,6 +29,10 @@ export default function App() {
   const [topic, setTopic] = useState(topicOptions[1].value); // Default to Business
   const [newsHeadlines, setNewsHeadlines] = useState<NewsHeadline[]>([]);
   const [showNewsSelector, setShowNewsSelector] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [lastSearchQuery, setLastSearchQuery] = useState('');
 
   // Effect for the initial greeting. Runs only once on component mount.
   useEffect(() => {
@@ -89,9 +93,25 @@ export default function App() {
       englishText: aiResponse.english,
       japaneseText: aiResponse.japanese,
       replySuggestions: aiResponse.suggestions,
+      triggerSearch: aiResponse.triggerSearch,
     };
     
     setMessages(prev => [...prev, newAiMessage]);
+    
+    // If AI wants to trigger a web search, do it asynchronously
+    if (aiResponse.triggerSearch) {
+      setIsSearching(true);
+      setLastSearchQuery(englishText);
+      
+      // Perform search in background
+      getWebSearchResults(englishText).then(results => {
+        setSearchResults(results);
+        setIsSearching(false);
+        if (results.length > 0) {
+          setShowSearchResults(true);
+        }
+      });
+    }
     
     // After user's 3rd message (history length: AI, User, AI, User, AI, User = 6)
     if (currentHistory.length === 6 && newsHeadlines.length > 0) {
@@ -101,6 +121,28 @@ export default function App() {
     setIsLoading(false);
   }, [isLoading, messages, personality, topic, newsHeadlines]);
   
+  const handleSearchResultSelection = useCallback(async (result: SearchResult) => {
+    if (isLoading) return;
+
+    setIsLoading(true);
+    setShowSearchResults(false);
+
+    const response = await getGreetingForSearchResult(result, personality);
+
+    const searchAiMessage: ChatMessage = {
+      id: `ai-search-${Date.now()}`,
+      sender: MessageSender.AI,
+      englishText: response.english,
+      japaneseText: response.japanese,
+      replySuggestions: response.suggestions,
+      source: response.source,
+    };
+
+    setMessages(prev => [...prev, searchAiMessage]);
+    setSearchResults([]);
+    setIsLoading(false);
+  }, [isLoading, personality]);
+
   const handleNewsSelection = useCallback(async (headline: NewsHeadline) => {
     if (isLoading) return;
 
@@ -131,20 +173,20 @@ export default function App() {
           {/* App Info & Settings */}
           <div>
             <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-green-600">
-              Eikaiwa Buddy
+              英会話バディ
             </h1>
-            <p className="text-gray-500 mb-6">Your AI Partner for English Conversation</p>
+            <p className="text-gray-500 mb-6">AIと楽しく英会話を学ぼう</p>
 
             <div className="space-y-4">
                 <div>
-                    <label htmlFor="personality-select" className="block text-sm font-medium text-gray-700 mb-1">AI Personality</label>
+                    <label htmlFor="personality-select" className="block text-sm font-medium text-gray-700 mb-1">AIの性格</label>
                     <select
                         id="personality-select"
                         value={personality}
                         onChange={(e) => setPersonality(e.target.value)}
                         disabled={isLoading}
                         className="w-full px-3 py-2 text-base text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 transition disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        aria-label="Select AI personality"
+                        aria-label="AIの性格を選択"
                     >
                         {personalityOptions.map(option => (
                         <option key={option.value} value={option.value}>
@@ -154,14 +196,14 @@ export default function App() {
                     </select>
                 </div>
                 <div>
-                    <label htmlFor="topic-select" className="block text-sm font-medium text-gray-700 mb-1">News Genre</label>
+                    <label htmlFor="topic-select" className="block text-sm font-medium text-gray-700 mb-1">ニュースジャンル</label>
                     <select
                         id="topic-select"
                         value={topic}
                         onChange={(e) => setTopic(e.target.value)}
                         disabled={isLoading}
                         className="w-full px-3 py-2 text-base text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 transition disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        aria-label="Select news genre"
+                        aria-label="ニュースジャンルを選択"
                     >
                         {topicOptions.map(option => (
                         <option key={option.value} value={option.value}>
@@ -184,6 +226,10 @@ export default function App() {
             newsHeadlines={newsHeadlines}
             showNewsSelector={showNewsSelector}
             onNewsSelect={handleNewsSelection}
+            isSearching={isSearching}
+            searchResults={searchResults}
+            showSearchResults={showSearchResults}
+            onSearchResultSelect={handleSearchResultSelection}
           />
         </div>
       </main>

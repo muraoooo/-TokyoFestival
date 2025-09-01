@@ -1,5 +1,5 @@
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
-import { ChatMessage, MessageSender, NewsHeadline } from '../types';
+import { ChatMessage, MessageSender, NewsHeadline, SearchResult } from '../types';
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 console.log("API Key status:", apiKey && apiKey !== 'PLACEHOLDER_API_KEY' ? "Found (configured)" : "Not configured or placeholder");
@@ -287,7 +287,7 @@ Keep your entire response natural, engaging, and around 1-3 sentences.`;
 };
 
 
-export const getAIResponse = async (history: ChatMessage[], userMessage: string, personality: string, topic: string): Promise<{ english: string; japanese: string; suggestions: { english: string; japanese: string }[] }> => {
+export const getAIResponse = async (history: ChatMessage[], userMessage: string, personality: string, topic: string): Promise<{ english: string; japanese: string; suggestions: { english: string; japanese: string }[]; triggerSearch?: boolean }> => {
   if (!ai) {
     return { 
         english: "I'm in demo mode. To have real conversations, please configure your Gemini API key in the .env.local file.", 
@@ -302,6 +302,31 @@ export const getAIResponse = async (history: ChatMessage[], userMessage: string,
   
   try {
     const model = 'gemini-2.5-flash';
+    
+    // Check if user is asking to search the web
+    const searchPhrases = [
+      'ウェブで調べて', 'webで調べて', 'ネットで調べて', 
+      'search the web', 'look it up', 'google it', 
+      '調べて', '検索して', 'search for'
+    ];
+    
+    const isSearchRequest = searchPhrases.some(phrase => 
+      userMessage.toLowerCase().includes(phrase.toLowerCase())
+    );
+    
+    if (isSearchRequest) {
+      // Return immediate response that search will be performed
+      return {
+        english: "Let me search that for you. I'll look up the latest information while we continue our conversation.",
+        japanese: "調べてみますね。最新の情報を探している間も、会話を続けられますよ。",
+        suggestions: [
+          { english: "Take your time.", japanese: "ゆっくりどうぞ。" },
+          { english: "Thanks for checking!", japanese: "調べてくれてありがとう！" },
+          { english: "What else can you tell me?", japanese: "他に何か教えてくれる？" }
+        ],
+        triggerSearch: true
+      };
+    }
 
     const personalityInstruction = personalityInstructions[personality] || personalityInstructions['standard'];
     const topicInstruction = topicInstructions[topic] || "";
@@ -355,6 +380,160 @@ export const getAIResponse = async (history: ChatMessage[], userMessage: string,
         japanese: "申し訳ありませんが、エラーが発生しました。もう一度お試しください。",
         suggestions: []
     };
+  }
+};
+
+export const getGreetingForSearchResult = async (
+  result: SearchResult, 
+  personality: string
+): Promise<{ english: string; japanese: string; suggestions: { english: string; japanese: string }[]; source: { uri: string; title: string; } }> => {
+  if (!ai) {
+    return {
+      english: `I found an article about "${result.title}". What would you like to know about this topic?`,
+      japanese: `「${result.japaneseTitle || result.title}」についての記事を見つけました。このトピックについて何を知りたいですか？`,
+      suggestions: [
+        { english: "Tell me more.", japanese: "もっと教えて。" },
+        { english: "That's interesting!", japanese: "面白いですね！" },
+        { english: "What else did you find?", japanese: "他に何を見つけましたか？" }
+      ],
+      source: { uri: result.url, title: result.title }
+    };
+  }
+  
+  try {
+    const model = 'gemini-2.5-flash';
+    const personalityInstruction = personalityInstructions[personality] || personalityInstructions['standard'];
+    
+    const greetingPrompt = `You are an AI English conversation partner with the persona '${personalityInstruction}'.
+The user selected this search result to discuss:
+Title: "${result.title}"
+Snippet: "${result.snippet}"
+Your task:
+1. Briefly acknowledge their interest in this topic.
+2. Share one interesting aspect from the snippet.
+3. Ask an engaging question to continue the conversation.
+Keep your response natural and around 2-3 sentences.`;
+    
+    const greetingResponse = await ai.models.generateContent({
+      model,
+      contents: greetingPrompt,
+    });
+    
+    const englishGreeting = greetingResponse.text;
+    
+    const detailsResponse = await ai.models.generateContent({
+      model: model,
+      contents: `For the following English text, provide its Japanese translation and three simple English reply suggestions (each with its own Japanese translation). Your ENTIRE output must be a single, valid JSON object with no extra text. English text: "${englishGreeting}"`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            japaneseTranslation: { type: Type.STRING },
+            replySuggestions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  english: { type: Type.STRING },
+                  japanese: { type: Type.STRING }
+                },
+                required: ["english", "japanese"]
+              }
+            }
+          },
+          required: ["japaneseTranslation", "replySuggestions"]
+        }
+      }
+    });
+    
+    const detailsData = JSON.parse(detailsResponse.text);
+    
+    return {
+      english: englishGreeting,
+      japanese: detailsData.japaneseTranslation,
+      suggestions: detailsData.replySuggestions,
+      source: { uri: result.url, title: result.title }
+    };
+    
+  } catch (error) {
+    console.error("Error creating search result greeting:", error);
+    return {
+      english: `I found an article about "${result.title}". What would you like to know about this topic?`,
+      japanese: `「${result.japaneseTitle || result.title}」についての記事を見つけました。このトピックについて何を知りたいですか？`,
+      suggestions: [
+        { english: "Tell me more.", japanese: "もっと教えて。" },
+        { english: "That's interesting!", japanese: "面白いですね！" },
+        { english: "What else did you find?", japanese: "他に何を見つけましたか？" }
+      ],
+      source: { uri: result.url, title: result.title }
+    };
+  }
+};
+
+export const getWebSearchResults = async (query: string): Promise<SearchResult[]> => {
+  if (!ai) {
+    return [];
+  }
+  
+  try {
+    const model = 'gemini-2.5-flash';
+    
+    // Extract the actual search query from the user message
+    const cleanQuery = query.replace(/ウェブで調べて|webで調べて|ネットで調べて|調べて|検索して|search for|search the web|look it up|google it/gi, '').trim();
+    
+    // Step 1: Perform web search
+    const searchResponse = await ai.models.generateContent({
+      model: model,
+      contents: `Search the web for: "${cleanQuery || query}". Find 3 relevant, recent results. For each result, provide the title, a brief snippet describing the content, and the URL. Format as a JSON array.`,
+      config: {
+        tools: [{googleSearch: {}}],
+      }
+    });
+    
+    let text = searchResponse.text.trim();
+    if (text.startsWith('```json')) {
+      text = text.substring(7, text.length - 3).trim();
+    } else if (text.startsWith('```')) {
+      text = text.substring(3, text.length - 3).trim();
+    }
+    
+    const searchResults = JSON.parse(text);
+    if (!Array.isArray(searchResults)) {
+      return [];
+    }
+    
+    // Step 2: Translate results to Japanese
+    const translationPrompt = `For each search result in the following JSON array, add "japaneseTitle" and "japaneseSnippet" fields with Japanese translations. Return as JSON array.
+Input: ${JSON.stringify(searchResults.slice(0, 3))}`;
+    
+    const translationResponse = await ai.models.generateContent({
+      model: model,
+      contents: translationPrompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              snippet: { type: Type.STRING },
+              url: { type: Type.STRING },
+              japaneseTitle: { type: Type.STRING },
+              japaneseSnippet: { type: Type.STRING }
+            },
+            required: ["title", "snippet", "url", "japaneseTitle", "japaneseSnippet"]
+          }
+        }
+      }
+    });
+    
+    return JSON.parse(translationResponse.text);
+    
+  } catch (error) {
+    console.error("Error performing web search:", error);
+    return [];
   }
 };
 

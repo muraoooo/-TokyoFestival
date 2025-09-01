@@ -11,7 +11,8 @@ interface VoiceInputProps {
 export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscriptReceived, disabled }) => {
   const { 
     isListening, 
-    transcript, 
+    transcript,
+    interimTranscript, 
     error, 
     startListening, 
     stopListening,
@@ -40,8 +41,19 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscriptReceived, di
 
   return (
     <div className="flex flex-col items-center justify-center p-4 bg-white rounded-lg shadow-md">
-      <h2 className="text-xl font-bold mb-4 text-emerald-600">Speak in English</h2>
-      <p className="text-gray-500 mb-4 h-5 text-sm">{isListening ? "Listening..." : "Click the mic to speak"}</p>
+      <h2 className="text-xl font-bold mb-4 text-emerald-600">英語で話してみよう</h2>
+      <div className="mb-4 h-12 flex items-center justify-center">
+        {isListening ? (
+          <div className="text-center">
+            <p className="text-gray-500 text-sm">聞き取り中...</p>
+            {interimTranscript && (
+              <p className="text-gray-700 text-sm mt-1 italic">{interimTranscript}</p>
+            )}
+          </div>
+        ) : (
+          <p className="text-gray-500 text-sm">マイクをタップして話す</p>
+        )}
+      </div>
       <button
         onClick={handleMicClick}
         disabled={disabled || !hasRecognitionSupport}
@@ -54,7 +66,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscriptReceived, di
         <MicrophoneIcon className="w-12 h-12 text-white" />
       </button>
       {error && <p className="text-red-500 mt-4 text-center text-sm">{error}</p>}
-      {!hasRecognitionSupport && <p className="text-red-500 mt-4 text-center text-sm">Speech recognition not supported in this browser.</p>}
+      {!hasRecognitionSupport && <p className="text-red-500 mt-4 text-center text-sm">このブラウザは音声認識に対応していません。</p>}
     </div>
   );
 };

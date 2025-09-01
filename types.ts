@@ -22,4 +22,13 @@ export interface ChatMessage {
     uri: string;
     title: string;
   };
+  triggerSearch?: boolean;
+}
+
+export interface SearchResult {
+  title: string;
+  snippet: string;
+  url: string;
+  japaneseTitle?: string;
+  japaneseSnippet?: string;
 }
