@@ -1,0 +1,8 @@
+{
+  "name": "Copy of Eikaiwa Buddy",
+  "description": "An AI-powered application for Japanese speakers to practice their English conversation skills through voice chat and translation assistance.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "prompt": ""
+}
