@@ -13,11 +13,12 @@ export const Translator: React.FC<TranslatorProps> = ({ onSend, disabled }) => {
   const [japaneseText, setJapaneseText] = useState('');
   const [translationResult, setTranslationResult] = useState<{ main: string } | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [translationError, setTranslationError] = useState('');
+
 
   const {
     isListening,
     transcript,
-    interimTranscript,
     startListening,
     stopListening,
     hasRecognitionSupport
@@ -26,6 +27,7 @@ export const Translator: React.FC<TranslatorProps> = ({ onSend, disabled }) => {
   useEffect(() => {
     if (transcript) {
         setJapaneseText(prevText => prevText ? `${prevText} ${transcript}` : transcript);
+        setTranslationError('');
     }
   }, [transcript]);
 
@@ -34,17 +36,22 @@ export const Translator: React.FC<TranslatorProps> = ({ onSend, disabled }) => {
     if (!japaneseText.trim() || disabled) return;
     setIsTranslating(true);
     setTranslationResult(null);
+    setTranslationError('');
+
     const result = await translateJapaneseToEnglish(japaneseText);
-    setTranslationResult(result);
     setIsTranslating(false);
 
-    // 読み上げ機能は一時的に無効化
-    // if (result?.main && 'speechSynthesis' in window) {
-    //   const utterance = new SpeechSynthesisUtterance(result.main);
-    //   utterance.lang = 'en-US';
-    //   window.speechSynthesis.cancel();
-    //   window.speechSynthesis.speak(utterance);
-    // }
+    if (result?.main) {
+      setTranslationResult(result);
+      if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(result.main);
+        utterance.lang = 'en-US';
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+      }
+    } else {
+      setTranslationError('翻訳に失敗しました。もう一度お試しください。');
+    }
   };
 
   const handleSend = () => {
@@ -52,6 +59,7 @@ export const Translator: React.FC<TranslatorProps> = ({ onSend, disabled }) => {
     onSend(translationResult.main);
     setJapaneseText('');
     setTranslationResult(null);
+    setTranslationError('');
   };
   
   const handleMicClick = () => {
@@ -64,21 +72,24 @@ export const Translator: React.FC<TranslatorProps> = ({ onSend, disabled }) => {
   };
 
   return (
-    <div className="flex flex-col p-4 bg-white rounded-lg shadow-md mt-6">
-      <h2 className="text-xl font-bold mb-4 text-green-600">日本語から翻訳</h2>
+    <div className="flex flex-col p-3 bg-white/80 backdrop-blur-sm rounded-xl shadow-md h-full">
+      <h2 className="text-lg font-semibold mb-2 text-green-600">翻訳サポート</h2>
       <div className="relative w-full">
         <textarea
             value={japaneseText}
-            onChange={(e) => setJapaneseText(e.target.value)}
+            onChange={(e) => {
+                setJapaneseText(e.target.value)
+                setTranslationError('');
+            }}
             placeholder="困った時は日本語で入力・音声入力..."
-            className="w-full h-24 p-2 pr-12 bg-gray-100 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-800 resize-none"
+            className="w-full h-20 p-2 pr-12 bg-gray-100 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-800 resize-none"
             disabled={disabled}
         />
         {hasRecognitionSupport && (
              <button
                 onClick={handleMicClick}
                 disabled={disabled}
-                className={`absolute top-3 right-3 p-1 rounded-full transition-colors ${
+                className={`absolute top-2 right-2 p-1 rounded-full transition-colors ${
                     isListening ? 'bg-red-500 text-white animate-pulse' : 'text-gray-500 hover:bg-gray-200'
                 } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
                 aria-label={isListening ? 'マイクをオフにする' : 'マイクをオンにする'}
@@ -90,7 +101,7 @@ export const Translator: React.FC<TranslatorProps> = ({ onSend, disabled }) => {
       <button
         onClick={handleTranslate}
         disabled={disabled || isTranslating || !japaneseText.trim()}
-        className="mt-3 w-full flex items-center justify-center px-4 py-2 bg-emerald-500 text-white font-semibold rounded-md hover:bg-emerald-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+        className="mt-2 w-full flex items-center justify-center px-4 py-2 bg-emerald-500 text-white font-semibold rounded-md hover:bg-emerald-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
       >
         {isTranslating ? (
           <div className="w-5 h-5 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
@@ -102,13 +113,15 @@ export const Translator: React.FC<TranslatorProps> = ({ onSend, disabled }) => {
         )}
       </button>
 
+      {translationError && <p className="text-red-500 mt-2 text-sm text-center">{translationError}</p>}
+
       {translationResult && translationResult.main && (
-        <div className="mt-4 p-3 bg-emerald-50 rounded-md border border-gray-200">
+        <div className="mt-3 p-2 bg-emerald-50 rounded-md border border-gray-200">
             <p className="font-semibold text-gray-800">{translationResult.main}</p>
             <button
                 onClick={handleSend}
                 disabled={disabled}
-                className="mt-3 w-full flex items-center justify-center px-4 py-2 bg-green-500 text-white font-semibold rounded-md hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                className="mt-2 w-full flex items-center justify-center px-4 py-2 bg-green-500 text-white font-semibold rounded-md hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
             >
                 <SendIcon className="w-5 h-5 mr-2" />
                 <span>チャットに送信</span>

@@ -1,4 +1,3 @@
-
 export enum MessageSender {
   USER = 'user',
   AI = 'ai',
@@ -22,7 +21,18 @@ export interface ChatMessage {
     uri: string;
     title: string;
   };
+  groundingSources?: {
+    uri: string;
+    title: string;
+  }[];
   triggerSearch?: boolean;
+}
+
+export interface CustomOption {
+  id: string;
+  value: string;
+  label:string;
+  isDefault?: boolean;
 }
 
 export interface SearchResult {

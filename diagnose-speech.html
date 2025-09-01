@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech Synthesis Diagnosis</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            padding: 20px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #007aff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .voice-info {
+            background: #f0f0f0;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        #log {
+            background: black;
+            color: lime;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            height: 200px;
+            overflow-y: auto;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Speech Synthesis Diagnosis for Mac</h1>
+    
+    <div class="test-section">
+        <h2>1. Browser & System Check</h2>
+        <div id="systemInfo"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>2. Speech Synthesis Support</h2>
+        <div id="supportInfo"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>3. Voice Analysis</h2>
+        <button onclick="analyzeVoices()">Analyze All Voices</button>
+        <div id="voiceAnalysis"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>4. Test Speech</h2>
+        <button onclick="testSimple()">Test Simple</button>
+        <button onclick="testWithCancel()">Test with Cancel</button>
+        <button onclick="testMacVoice()">Test Mac Voice</button>
+        <button onclick="testWithTimeout()">Test with Timeout</button>
+        <button onclick="stopAll()">Stop All</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>5. Debug Log</h2>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        const log = (msg, type = 'info') => {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const color = type === 'error' ? 'red' : type === 'success' ? 'lime' : 'yellow';
+            logDiv.innerHTML += `<span style="color: ${color}">[${time}] ${msg}</span>\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(msg);
+        };
+
+        // 1. System Info
+        const checkSystem = () => {
+            const info = document.getElementById('systemInfo');
+            const ua = navigator.userAgent;
+            const isMac = ua.includes('Mac');
+            const browser = ua.includes('Chrome') ? 'Chrome' : 
+                          ua.includes('Safari') && !ua.includes('Chrome') ? 'Safari' : 
+                          ua.includes('Firefox') ? 'Firefox' : 'Other';
+            
+            info.innerHTML = `
+                <div class="voice-info ${isMac ? 'success' : 'warning'}">
+                    Platform: ${isMac ? '✅ Mac OS' : '❌ Not Mac'}<br>
+                    Browser: ${browser}<br>
+                    User Agent: ${ua}
+                </div>
+            `;
+            
+            log(`System: Mac=${isMac}, Browser=${browser}`);
+        };
+
+        // 2. Support Check
+        const checkSupport = () => {
+            const info = document.getElementById('supportInfo');
+            const supported = 'speechSynthesis' in window;
+            const speaking = supported ? speechSynthesis.speaking : false;
+            const paused = supported ? speechSynthesis.paused : false;
+            const pending = supported ? speechSynthesis.pending : false;
+            
+            info.innerHTML = `
+                <div class="voice-info ${supported ? 'success' : 'error'}">
+                    Speech Synthesis: ${supported ? '✅ Supported' : '❌ Not Supported'}<br>
+                    ${supported ? `
+                        Speaking: ${speaking}<br>
+                        Paused: ${paused}<br>
+                        Pending: ${pending}
+                    ` : ''}
+                </div>
+            `;
+            
+            log(`Support: ${supported ? 'YES' : 'NO'}`);
+        };
+
+        // 3. Voice Analysis
+        const analyzeVoices = () => {
+            const voices = speechSynthesis.getVoices();
+            const analysis = document.getElementById('voiceAnalysis');
+            
+            log(`Total voices: ${voices.length}`);
+            
+            // Categorize voices
+            const macVoices = voices.filter(v => v.localService === true);
+            const englishMacVoices = macVoices.filter(v => v.lang.startsWith('en'));
+            const usMacVoices = macVoices.filter(v => v.lang === 'en-US');
+            
+            // Find specific Mac voices
+            const knownMacVoices = ['Samantha', 'Alex', 'Victoria', 'Allison', 'Ava', 'Susan', 'Tom', 'Zoe'];
+            const foundMacVoices = [];
+            
+            knownMacVoices.forEach(name => {
+                const voice = voices.find(v => v.name.includes(name));
+                if (voice) {
+                    foundMacVoices.push(voice);
+                    log(`Found ${name}: ${voice.name} (local: ${voice.localService})`, 'success');
+                }
+            });
+            
+            analysis.innerHTML = `
+                <div class="voice-info">
+                    <strong>Voice Statistics:</strong><br>
+                    Total Voices: ${voices.length}<br>
+                    Mac System Voices: ${macVoices.length}<br>
+                    English Mac Voices: ${englishMacVoices.length}<br>
+                    US English Mac Voices: ${usMacVoices.length}<br>
+                    <br>
+                    <strong>Found Mac Voices:</strong><br>
+                    ${foundMacVoices.map(v => `• ${v.name} (${v.lang})`).join('<br>') || 'None found'}
+                </div>
+                <details>
+                    <summary>All Voices (click to expand)</summary>
+                    ${voices.map(v => `
+                        <div class="voice-info">
+                            Name: ${v.name}<br>
+                            Lang: ${v.lang}<br>
+                            Local: ${v.localService}<br>
+                            Default: ${v.default}
+                        </div>
+                    `).join('')}
+                </details>
+            `;
+        };
+
+        // Test Functions
+        const testSimple = () => {
+            log('Testing simple speech...');
+            const text = "Hello, this is a simple test.";
+            const uttr = new SpeechSynthesisUtterance(text);
+            uttr.onstart = () => log('Started', 'success');
+            uttr.onend = () => log('Ended', 'success');
+            uttr.onerror = (e) => log(`Error: ${e.error}`, 'error');
+            speechSynthesis.speak(uttr);
+        };
+
+        const testWithCancel = () => {
+            log('Testing with cancel first...');
+            speechSynthesis.cancel();
+            
+            setTimeout(() => {
+                const text = "This is after canceling previous speech.";
+                const uttr = new SpeechSynthesisUtterance(text);
+                uttr.onstart = () => log('Started', 'success');
+                uttr.onend = () => log('Ended', 'success');
+                uttr.onerror = (e) => log(`Error: ${e.error}`, 'error');
+                speechSynthesis.speak(uttr);
+            }, 100);
+        };
+
+        const testMacVoice = () => {
+            log('Testing Mac voice...');
+            speechSynthesis.cancel();
+            
+            const voices = speechSynthesis.getVoices();
+            const macVoice = voices.find(v => 
+                v.localService === true && 
+                (v.lang === 'en-US' || v.lang.startsWith('en'))
+            );
+            
+            if (!macVoice) {
+                log('No Mac voice found!', 'error');
+                return;
+            }
+            
+            log(`Using Mac voice: ${macVoice.name}`, 'success');
+            
+            const text = "Hello, I am speaking with a Mac system voice.";
+            const uttr = new SpeechSynthesisUtterance(text);
+            uttr.voice = macVoice;
+            uttr.rate = 0.9;
+            uttr.onstart = () => log('Started with Mac voice', 'success');
+            uttr.onend = () => log('Ended', 'success');
+            uttr.onerror = (e) => log(`Error: ${e.error}`, 'error');
+            
+            speechSynthesis.speak(uttr);
+        };
+
+        const testWithTimeout = () => {
+            log('Testing with timeout...');
+            speechSynthesis.cancel();
+            
+            setTimeout(() => {
+                const text = "This message plays after a delay.";
+                const uttr = new SpeechSynthesisUtterance(text);
+                uttr.lang = 'en-US';
+                uttr.rate = 0.9;
+                
+                // Force voice selection
+                const voices = speechSynthesis.getVoices();
+                const voice = voices.find(v => v.lang === 'en-US' && v.localService);
+                if (voice) {
+                    uttr.voice = voice;
+                    log(`Selected voice: ${voice.name}`, 'success');
+                }
+                
+                uttr.onstart = () => log('Started after timeout', 'success');
+                uttr.onend = () => log('Ended', 'success');
+                uttr.onerror = (e) => log(`Error: ${e.error}`, 'error');
+                
+                speechSynthesis.speak(uttr);
+            }, 500);
+        };
+
+        const stopAll = () => {
+            speechSynthesis.cancel();
+            log('Stopped all speech', 'warning');
+        };
+
+        // Initialize
+        window.addEventListener('load', () => {
+            checkSystem();
+            checkSupport();
+            
+            // Load voices
+            if ('speechSynthesis' in window) {
+                // Try to get voices immediately
+                if (speechSynthesis.getVoices().length > 0) {
+                    analyzeVoices();
+                }
+                
+                // Also listen for voice changes
+                speechSynthesis.addEventListener('voiceschanged', () => {
+                    log('Voices changed event fired');
+                    analyzeVoices();
+                });
+            }
+        });
+    </script>
+</body>
+</html>

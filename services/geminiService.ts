@@ -1,15 +1,12 @@
-import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
-import { ChatMessage, MessageSender, NewsHeadline, SearchResult } from '../types';
+import { GoogleGenAI, Type } from "@google/genai";
+import { ChatMessage, MessageSender, NewsHeadline } from '../types';
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-console.log("API Key status:", apiKey && apiKey !== 'PLACEHOLDER_API_KEY' ? "Found (configured)" : "Not configured or placeholder");
-
-if (!apiKey || apiKey === 'PLACEHOLDER_API_KEY') {
-  console.warn("⚠️ VITE_GEMINI_API_KEY is not properly configured. Please set a valid Gemini API key in .env.local file.");
-  console.warn("To get an API key, visit: https://makersuite.google.com/app/apikey");
-}
-
 const ai = apiKey && apiKey !== 'PLACEHOLDER_API_KEY' ? new GoogleGenAI({ apiKey }) : null;
+
+if (!ai) {
+  console.warn("⚠️ Gemini API key not configured. Please set VITE_GEMINI_API_KEY in .env.local");
+}
 
 const chatHistoryToGeminiHistory = (history: ChatMessage[]) => {
     return history.map(msg => ({
@@ -18,7 +15,7 @@ const chatHistoryToGeminiHistory = (history: ChatMessage[]) => {
     }));
 };
 
-const personalityInstructions: { [key: string]: string } = {
+const PERSONALITY_MAP: Record<string, string> = {
   'standard': "You are a friendly and encouraging English conversation partner for a Japanese speaker.",
   'charismatic-sarcastic': "You are an English conversation partner for a Japanese speaker. Your persona is 'Charismatic and passionate, but with a sarcastic edge'.",
   'calm-sharp': "You are an English conversation partner for a Japanese speaker. Your persona is 'Calm and intellectual, but with a sharp, biting wit'.",
@@ -27,7 +24,10 @@ const personalityInstructions: { [key: string]: string } = {
   'hearty-direct': "You are an English conversation partner for a Japanese speaker. Your persona is 'Hearty, bold, and laughs loudly, with a very direct and unfiltered way of speaking'.",
 };
 
-const topicInstructions: { [key: string]: string } = {
+const getPersonalityInstruction = (personality: string): string => 
+  PERSONALITY_MAP[personality] || `You are an English conversation partner for a Japanese speaker. Your persona is: "${personality}".`;
+
+const TOPIC_MAP: Record<string, string> = {
   'world': "You must try to steer the conversation towards topics related to World & Politics.",
   'business': "You must try to steer the conversation towards topics related to Business & Economy.",
   'science': "You must try to steer the conversation towards topics related to Science & Technology.",
@@ -35,14 +35,8 @@ const topicInstructions: { [key: string]: string } = {
   'human': "You must try to steer the conversation towards topics related to Human Stories & Others.",
 };
 
-// This list is used to generate a more user-friendly prompt for the news greeting.
-const topicOptions = [
-  { value: 'world', label: 'World & Politics' },
-  { value: 'business', label: 'Business & Economy' },
-  { value: 'science', label: 'Science & Technology' },
-  { value: 'culture', label: 'Culture & Lifestyle' },
-  { value: 'human', label: 'Human Stories & Others' },
-];
+const getTopicInstruction = (topic: string): string => 
+  TOPIC_MAP[topic] || `You must try to steer the conversation towards topics related to ${topic}.`;
 
 export const getInitialGreeting = async (personality: string): Promise<{ english: string; japanese: string; suggestions: { english: string; japanese: string }[] }> => {
     if (!ai) {
@@ -59,7 +53,7 @@ export const getInitialGreeting = async (personality: string): Promise<{ english
     
     try {
         const model = 'gemini-2.5-flash';
-        const personalityInstruction = personalityInstructions[personality] || personalityInstructions['standard'];
+        const personalityInstruction = getPersonalityInstruction(personality);
 
         const greetingPrompt = `You are an AI English conversation partner with the persona '${personalityInstruction}'. Your task is to start a friendly, open-ended conversation. Keep your entire response natural, engaging, and around 1-2 sentences. Do not ask about the news.`;
 
@@ -73,33 +67,7 @@ export const getInitialGreeting = async (personality: string): Promise<{ english
             throw new Error("Failed to generate greeting.");
         }
         
-        const detailsResponse = await ai.models.generateContent({
-            model: model,
-            contents: `For the following English text, provide its Japanese translation and three simple English reply suggestions (each with its own Japanese translation). Your ENTIRE output must be a single, valid JSON object with no extra text. English text: "${englishGreeting}"`,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        japaneseTranslation: { type: Type.STRING },
-                        replySuggestions: {
-                            type: Type.ARRAY,
-                            items: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    english: { type: Type.STRING },
-                                    japanese: { type: Type.STRING }
-                                },
-                                required: ["english", "japanese"]
-                            }
-                        }
-                    },
-                    required: ["japaneseTranslation", "replySuggestions"]
-                }
-            }
-        });
-        
-        const detailsData = JSON.parse(detailsResponse.text);
+        const detailsData = await generateDetailsWithSuggestions(englishGreeting);
 
         return {
             english: englishGreeting,
@@ -127,7 +95,15 @@ export const getNewsHeadlines = async (topic: string): Promise<NewsHeadline[]> =
     
     try {
         const model = 'gemini-2.5-flash';
-        const topicLabel = topicOptions.find(o => o.value === topic)?.label || topic;
+        // Map topic value to label
+        const topicLabels: Record<string, string> = {
+            'world': 'World & Politics',
+            'business': 'Business & Economy',
+            'science': 'Science & Technology',
+            'culture': 'Culture & Lifestyle',
+            'human': 'Human Stories & Others'
+        };
+        const topicLabel = topicLabels[topic] || topic;
         
         // Step 1: Get news articles in English using Google Search
         const searchResponse = await ai.models.generateContent({
@@ -212,7 +188,7 @@ export const getGreetingForSelectedNews = async (
     
     try {
         const model = 'gemini-2.5-flash';
-        const personalityInstruction = personalityInstructions[personality] || personalityInstructions['standard'];
+        const personalityInstruction = getPersonalityInstruction(personality);
 
         // Step 1: Generate conversation starter
         const greetingPrompt = `You are an AI English conversation partner with the persona '${personalityInstruction}'.
@@ -234,34 +210,7 @@ Keep your entire response natural, engaging, and around 1-3 sentences.`;
             throw new Error("Failed to generate greeting for selected news.");
         }
 
-        // Step 2: Get Japanese translation and reply suggestions
-        const detailsResponse = await ai.models.generateContent({
-            model: model,
-            contents: `For the following English text, provide its Japanese translation and three simple English reply suggestions (each with its own Japanese translation). Your ENTIRE output must be a single, valid JSON object with no extra text. English text: "${englishGreeting}"`,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        japaneseTranslation: { type: Type.STRING },
-                        replySuggestions: {
-                            type: Type.ARRAY,
-                            items: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    english: { type: Type.STRING },
-                                    japanese: { type: Type.STRING }
-                                },
-                                required: ["english", "japanese"]
-                            }
-                        }
-                    },
-                    required: ["japaneseTranslation", "replySuggestions"]
-                }
-            }
-        });
-
-        const detailsData = JSON.parse(detailsResponse.text);
+        const detailsData = await generateDetailsWithSuggestions(englishGreeting);
 
         return {
             english: englishGreeting,
@@ -286,6 +235,54 @@ Keep your entire response natural, engaging, and around 1-3 sentences.`;
     }
 };
 
+
+const generateDetailsWithSuggestions = async (englishText: string) => {
+  if (!ai) throw new Error('AI not initialized');
+  
+  const model = 'gemini-2.5-flash';
+  const response = await ai.models.generateContent({
+    model,
+    contents: `For the following English text, provide its Japanese translation and three simple English reply suggestions (each with its own Japanese translation). Your ENTIRE output must be a single, valid JSON object with no extra text. English text: "${englishText}"`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          japaneseTranslation: { type: Type.STRING },
+          replySuggestions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                english: { type: Type.STRING },
+                japanese: { type: Type.STRING }
+              },
+              required: ["english", "japanese"]
+            }
+          }
+        },
+        required: ["japaneseTranslation", "replySuggestions"]
+      }
+    }
+  });
+  return JSON.parse(response.text);
+};
+
+export const translateUserMessage = async (englishText: string): Promise<string> => {
+  if (!ai) return "翻訳機能はAPIキーが必要です。";
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      systemInstruction: "You are a translator. Provide only the Japanese translation without any additional text or formatting.",
+      contents: [{ role: 'user', parts: [{ text: `Translate the following English text to natural Japanese. Only provide the Japanese translation, nothing else: "${englishText}"` }] }]
+    });
+    return response.response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+  } catch (error) {
+    console.error('Translation error:', error);
+    return "";
+  }
+};
 
 export const getAIResponse = async (history: ChatMessage[], userMessage: string, personality: string, topic: string): Promise<{ english: string; japanese: string; suggestions: { english: string; japanese: string }[]; triggerSearch?: boolean }> => {
   if (!ai) {
@@ -328,8 +325,8 @@ export const getAIResponse = async (history: ChatMessage[], userMessage: string,
       };
     }
 
-    const personalityInstruction = personalityInstructions[personality] || personalityInstructions['standard'];
-    const topicInstruction = topicInstructions[topic] || "";
+    const personalityInstruction = getPersonalityInstruction(personality);
+    const topicInstruction = getTopicInstruction(topic);
     const baseInstruction = "Keep your responses natural and engaging (around 1-3 sentences). Your entire output MUST be a single JSON object. Provide your English reply, its Japanese translation, and three simple English phrase suggestions for how the user could reply. For each suggestion, provide both the English phrase and its Japanese translation.";
     const systemInstruction = `${personalityInstruction} ${topicInstruction} ${baseInstruction}`;
 
@@ -402,7 +399,7 @@ export const getGreetingForSearchResult = async (
   
   try {
     const model = 'gemini-2.5-flash';
-    const personalityInstruction = personalityInstructions[personality] || personalityInstructions['standard'];
+    const personalityInstruction = getPersonalityInstruction(personality);
     
     const greetingPrompt = `You are an AI English conversation partner with the persona '${personalityInstruction}'.
 The user selected this search result to discuss:
@@ -421,33 +418,7 @@ Keep your response natural and around 2-3 sentences.`;
     
     const englishGreeting = greetingResponse.text;
     
-    const detailsResponse = await ai.models.generateContent({
-      model: model,
-      contents: `For the following English text, provide its Japanese translation and three simple English reply suggestions (each with its own Japanese translation). Your ENTIRE output must be a single, valid JSON object with no extra text. English text: "${englishGreeting}"`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            japaneseTranslation: { type: Type.STRING },
-            replySuggestions: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  english: { type: Type.STRING },
-                  japanese: { type: Type.STRING }
-                },
-                required: ["english", "japanese"]
-              }
-            }
-          },
-          required: ["japaneseTranslation", "replySuggestions"]
-        }
-      }
-    });
-    
-    const detailsData = JSON.parse(detailsResponse.text);
+    const detailsData = await generateDetailsWithSuggestions(englishGreeting);
     
     return {
       english: englishGreeting,

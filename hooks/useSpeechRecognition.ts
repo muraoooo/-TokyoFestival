@@ -69,73 +69,63 @@ interface UseSpeechRecognitionOptions {
 export const useSpeechRecognition = ({ lang }: UseSpeechRecognitionOptions) => {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState('');
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const speechEndTimeoutRef = useRef<number | null>(null);
+  const finalTranscriptRef = useRef<string>('');
 
   useEffect(() => {
     if (!SpeechRecognitionAPI) {
-        setError("Speech recognition not supported in this browser.");
+        setError("お使いのブラウザは音声認識に対応していません。");
         return;
     }
 
     const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = true; // 継続的に聞き取る
+    recognition.continuous = true; // Keep listening through pauses.
     recognition.lang = lang;
-    recognition.interimResults = true; // 途中経過も表示
+    recognition.interimResults = true; // Get results as they come in.
     recognitionRef.current = recognition;
 
     const handleResult = (event: Event) => {
         const speechEvent = event as SpeechRecognitionEvent;
-        let interimText = '';
-        let finalText = '';
         
-        for (let i = speechEvent.resultIndex; i < speechEvent.results.length; i++) {
-            const result = speechEvent.results[i];
-            if (result.isFinal) {
-                finalText += result[0].transcript;
-            } else {
-                interimText += result[0].transcript;
-            }
+        if (speechEndTimeoutRef.current) {
+            clearTimeout(speechEndTimeoutRef.current);
         }
+
+        const fullTranscript = Array.from(speechEvent.results)
+            .map(result => result[0].transcript)
+            .join('');
         
-        if (finalText) {
-            setTranscript(prev => prev + (prev ? ' ' : '') + finalText.trim());
-            setInterimTranscript('');
-        } else {
-            setInterimTranscript(interimText);
-        }
+        finalTranscriptRef.current = fullTranscript;
         
-        // 話し終わったら0.8秒後に自動的に認識を終了
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-        }
-        timeoutRef.current = setTimeout(() => {
-            if (recognitionRef.current && isListening) {
-                recognitionRef.current.stop();
-            }
-        }, 800);
+        // Set a timeout to stop recognition after a pause.
+        speechEndTimeoutRef.current = window.setTimeout(() => {
+            recognitionRef.current?.stop();
+        }, 800); // 800ms pause detection
     };
     
     const handleError = (event: Event) => {
         const errorEvent = event as SpeechRecognitionErrorEvent;
         if (errorEvent.error === 'not-allowed' || errorEvent.error === 'service-not-allowed') {
-            setError("Microphone access denied. Please enable it in your browser settings.");
+            setError("マイクへのアクセスが拒否されました。ブラウザの設定で許可してください。");
         } else {
-            // Don't show an error for 'no-speech' as it's a common occurrence
-            if(errorEvent.error !== 'no-speech') {
-               setError(`Speech recognition error: ${errorEvent.error}`);
+            // Don't show an error for 'no-speech' or 'aborted' as it's common and our timeout handles it
+            if(errorEvent.error !== 'no-speech' && errorEvent.error !== 'aborted') {
+               setError(`音声認識エラー: ${errorEvent.error}`);
             }
         }
         setIsListening(false);
     };
 
     const handleEnd = () => {
-        setIsListening(false);
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
+        if (speechEndTimeoutRef.current) {
+            clearTimeout(speechEndTimeoutRef.current);
         }
+        if (finalTranscriptRef.current) {
+            setTranscript(finalTranscriptRef.current);
+        }
+        setIsListening(false);
     };
 
     recognition.addEventListener('result', handleResult);
@@ -147,22 +137,23 @@ export const useSpeechRecognition = ({ lang }: UseSpeechRecognitionOptions) => {
         recognition.removeEventListener('error', handleError);
         recognition.removeEventListener('end', handleEnd);
         recognition.abort();
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
+        if (speechEndTimeoutRef.current) {
+            clearTimeout(speechEndTimeoutRef.current);
         }
     };
-  }, [lang, isListening]);
+  }, [lang]);
 
   const startListening = useCallback(() => {
     if (recognitionRef.current && !isListening) {
         try {
             setError('');
             setTranscript('');
+            finalTranscriptRef.current = '';
             recognitionRef.current.start();
             setIsListening(true);
         } catch (e) {
             console.error("Could not start recognition", e);
-            setError("Could not start recording. Is another app using the mic?");
+            setError("録音を開始できませんでした。他のアプリがマイクを使用していませんか？");
             setIsListening(false);
         }
     }
@@ -170,19 +161,22 @@ export const useSpeechRecognition = ({ lang }: UseSpeechRecognitionOptions) => {
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current && isListening) {
+        if (speechEndTimeoutRef.current) {
+            clearTimeout(speechEndTimeoutRef.current);
+        }
         recognitionRef.current.stop();
+        // The 'onend' event will handle the rest of the state updates.
     }
   }, [isListening]);
 
   const resetTranscript = useCallback(() => {
     setTranscript('');
-    setInterimTranscript('');
+    finalTranscriptRef.current = '';
   }, []);
   
   return {
       isListening,
       transcript,
-      interimTranscript,
       error,
       startListening,
       stopListening,

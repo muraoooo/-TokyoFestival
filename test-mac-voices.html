@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mac System Voices Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .voice-card {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .system-voice {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
+        .remote-voice {
+            background: #fff3e0;
+            border-color: #ff9800;
+        }
+        button {
+            background: #007aff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f0f0f0;
+            border-radius: 8px;
+        }
+        #status {
+            padding: 10px;
+            background: #e3f2fd;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎙️ Mac System Voices Test</h1>
+    
+    <div id="status">Initializing...</div>
+    
+    <div class="controls">
+        <h2>Test Controls</h2>
+        <button onclick="findMacVoices()">🔍 Find Mac System Voices</button>
+        <button onclick="testAllEnglishVoices()">🔊 Test All English Voices</button>
+        <button onclick="testBestVoice()">✨ Test Best Mac Voice</button>
+        <button onclick="stopSpeaking()">⏹️ Stop</button>
+    </div>
+    
+    <div>
+        <h2>Available Voices</h2>
+        <div id="voicesList"></div>
+    </div>
+    
+    <script>
+        let allVoices = [];
+        let currentUtterance = null;
+        
+        const status = (msg) => {
+            document.getElementById('status').innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong>: ${msg}`;
+            console.log(msg);
+        };
+        
+        const loadVoices = () => {
+            allVoices = speechSynthesis.getVoices();
+            displayVoices();
+            status(`Loaded ${allVoices.length} voices`);
+        };
+        
+        const displayVoices = () => {
+            const container = document.getElementById('voicesList');
+            container.innerHTML = '';
+            
+            // Separate voices by type
+            const systemVoices = allVoices.filter(v => v.localService);
+            const remoteVoices = allVoices.filter(v => !v.localService);
+            
+            // Display system voices first
+            if (systemVoices.length > 0) {
+                const header = document.createElement('h3');
+                header.textContent = `System Voices (${systemVoices.length}) - These are Mac's built-in voices`;
+                container.appendChild(header);
+                
+                systemVoices.forEach(voice => {
+                    const div = document.createElement('div');
+                    div.className = 'voice-card system-voice';
+                    div.innerHTML = `
+                        <strong>${voice.name}</strong><br>
+                        Language: ${voice.lang}<br>
+                        Default: ${voice.default ? 'Yes' : 'No'}<br>
+                        <button onclick="testVoice('${voice.name}')">Test This Voice</button>
+                    `;
+                    container.appendChild(div);
+                });
+            }
+            
+            // Display remote voices
+            if (remoteVoices.length > 0) {
+                const header = document.createElement('h3');
+                header.textContent = `Remote Voices (${remoteVoices.length})`;
+                container.appendChild(header);
+                
+                remoteVoices.forEach(voice => {
+                    const div = document.createElement('div');
+                    div.className = 'voice-card remote-voice';
+                    div.innerHTML = `
+                        <strong>${voice.name}</strong><br>
+                        Language: ${voice.lang}<br>
+                        <button onclick="testVoice('${voice.name}')">Test This Voice</button>
+                    `;
+                    container.appendChild(div);
+                });
+            }
+        };
+        
+        const findMacVoices = () => {
+            const macVoices = allVoices.filter(v => 
+                v.localService && 
+                (v.lang === 'en-US' || v.lang.startsWith('en'))
+            );
+            
+            status(`Found ${macVoices.length} Mac English voices`);
+            
+            macVoices.forEach(voice => {
+                console.log(`Mac Voice: ${voice.name} (${voice.lang})`);
+            });
+            
+            // Find specific Mac voices
+            const samantha = allVoices.find(v => v.name.toLowerCase().includes('samantha'));
+            const alex = allVoices.find(v => v.name.toLowerCase().includes('alex'));
+            const victoria = allVoices.find(v => v.name.toLowerCase().includes('victoria'));
+            
+            if (samantha) console.log('✅ Found Samantha:', samantha.name);
+            if (alex) console.log('✅ Found Alex:', alex.name);
+            if (victoria) console.log('✅ Found Victoria:', victoria.name);
+            
+            return macVoices;
+        };
+        
+        const testVoice = (voiceName) => {
+            const voice = allVoices.find(v => v.name === voiceName);
+            if (!voice) {
+                status(`Voice not found: ${voiceName}`);
+                return;
+            }
+            
+            stopSpeaking();
+            
+            const text = "Hello! This is a test of the Mac speech synthesis system. I am speaking with the voice called " + voiceName;
+            const uttr = new SpeechSynthesisUtterance(text);
+            uttr.voice = voice;
+            uttr.rate = 0.9;
+            uttr.pitch = 1.0;
+            uttr.volume = 1.0;
+            
+            uttr.onstart = () => status(`Speaking with: ${voiceName}`);
+            uttr.onend = () => status(`Finished: ${voiceName}`);
+            uttr.onerror = (e) => status(`Error with ${voiceName}: ${e.error}`);
+            
+            currentUtterance = uttr;
+            speechSynthesis.speak(uttr);
+        };
+        
+        const testAllEnglishVoices = () => {
+            const englishVoices = allVoices.filter(v => 
+                v.lang.startsWith('en') && v.localService
+            );
+            
+            let index = 0;
+            const testNext = () => {
+                if (index < englishVoices.length) {
+                    const voice = englishVoices[index];
+                    testVoice(voice.name);
+                    index++;
+                    setTimeout(testNext, 3000);
+                }
+            };
+            
+            testNext();
+        };
+        
+        const testBestVoice = () => {
+            // Priority order for Mac voices
+            const priorityNames = [
+                'Samantha', 'Alex', 'Victoria', 'Allison', 
+                'Ava', 'Susan', 'Zoe', 'Tom'
+            ];
+            
+            let bestVoice = null;
+            
+            // Find first available Mac voice from priority list
+            for (const name of priorityNames) {
+                bestVoice = allVoices.find(v => 
+                    v.name.toLowerCase().includes(name.toLowerCase()) && 
+                    v.localService
+                );
+                if (bestVoice) break;
+            }
+            
+            // Fallback to any US English Mac voice
+            if (!bestVoice) {
+                bestVoice = allVoices.find(v => 
+                    v.lang === 'en-US' && v.localService
+                );
+            }
+            
+            // Fallback to any English Mac voice
+            if (!bestVoice) {
+                bestVoice = allVoices.find(v => 
+                    v.lang.startsWith('en') && v.localService
+                );
+            }
+            
+            if (bestVoice) {
+                status(`Testing best Mac voice: ${bestVoice.name}`);
+                testVoice(bestVoice.name);
+            } else {
+                status('No suitable Mac voice found');
+            }
+        };
+        
+        const stopSpeaking = () => {
+            speechSynthesis.cancel();
+            status('Stopped speaking');
+        };
+        
+        // Initialize
+        if ('speechSynthesis' in window) {
+            status('Speech synthesis is supported');
+            
+            // Load voices
+            if (speechSynthesis.getVoices().length > 0) {
+                loadVoices();
+            }
+            
+            // Chrome/Safari need this event
+            speechSynthesis.addEventListener('voiceschanged', loadVoices);
+            
+            // Try to trigger voice loading
+            speechSynthesis.getVoices();
+        } else {
+            status('Speech synthesis is NOT supported');
+        }
+    </script>
+</body>
+</html>

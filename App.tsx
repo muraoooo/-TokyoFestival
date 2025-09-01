@@ -2,8 +2,9 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { ChatArea } from './components/ChatArea';
 import { VoiceInput } from './components/VoiceInput';
 import { Translator } from './components/Translator';
-import { ChatMessage, MessageSender, NewsHeadline, SearchResult } from './types';
-import { getAIResponse, getNewsHeadlines, getGreetingForSelectedNews, getInitialGreeting, getWebSearchResults, getGreetingForSearchResult } from './services/geminiService';
+import { SettingsPanel } from './components/SettingsPanel';
+import { ChatMessage, MessageSender, NewsHeadline, CustomOption } from './types';
+import { getAIResponse, getNewsHeadlines, getGreetingForSelectedNews, getInitialGreeting, getWebSearchResults, translateUserMessage } from './services/geminiService';
 
 const personalityOptions = [
   { value: 'standard', label: 'フレンドリー（標準）' },
@@ -15,11 +16,11 @@ const personalityOptions = [
 ];
 
 const topicOptions = [
-  { value: 'world', label: '世界・政治' },
-  { value: 'business', label: 'ビジネス・経済' },
-  { value: 'science', label: '科学・テクノロジー' },
-  { value: 'culture', label: '文化・生活' },
-  { value: 'human', label: '人間ドラマ・その他' },
+  { value: 'world', label: '世界・政治 (World & Politics)' },
+  { value: 'business', label: 'ビジネス・経済 (Business & Economy)' },
+  { value: 'science', label: '科学・テクノロジー (Science & Technology)' },
+  { value: 'culture', label: '文化・生活 (Culture & Lifestyle)' },
+  { value: 'human', label: '人間ドラマ・その他 (Human Stories & Others)' },
 ];
 
 export default function App() {
@@ -29,10 +30,61 @@ export default function App() {
   const [topic, setTopic] = useState(topicOptions[1].value); // Default to Business
   const [newsHeadlines, setNewsHeadlines] = useState<NewsHeadline[]>([]);
   const [showNewsSelector, setShowNewsSelector] = useState(false);
+
   const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchResults, setSearchResults] = useState<NewsHeadline[]>([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
-  const [lastSearchQuery, setLastSearchQuery] = useState('');
+  
+  const [showSettings, setShowSettings] = useState(false);
+  const [customPersonalities, setCustomPersonalities] = useState<CustomOption[]>([]);
+  const [customTopics, setCustomTopics] = useState<CustomOption[]>([]);
+
+
+
+  // Initialize speech synthesis and detect Mac system voices
+  useEffect(() => {
+    if ('speechSynthesis' in window) {
+      const loadVoices = () => {
+        const voices = speechSynthesis.getVoices();
+        console.log(`🎙️ Loaded ${voices.length} total voices`);
+        
+        // Find Mac system voices
+        const systemVoices = voices.filter(v => v.localService === true);
+        const englishSystemVoices = systemVoices.filter(v => 
+          v.lang === 'en-US' || v.lang.startsWith('en')
+        );
+        
+        console.log(`🖥️ Mac system voices: ${systemVoices.length}`);
+        console.log(`🇺🇸 English system voices: ${englishSystemVoices.length}`);
+        
+        // Log available Mac voices
+        const macVoiceNames = ['Samantha', 'Alex', 'Victoria', 'Allison', 'Ava', 'Susan', 'Zoe', 'Tom'];
+        macVoiceNames.forEach(name => {
+          const voice = voices.find(v => 
+            v.name.toLowerCase().includes(name.toLowerCase()) && v.localService
+          );
+          if (voice) {
+            console.log(`✅ Found Mac voice: ${voice.name} (${voice.lang})`);
+          }
+        });
+        
+        // Set a flag if we have good voices
+        if (englishSystemVoices.length > 0) {
+          console.log('🎉 Mac system voices are available for use');
+        } else {
+          console.warn('⚠️ No Mac system voices found, will use browser default');
+        }
+      };
+      
+      // Both Chrome and Safari need this
+      speechSynthesis.addEventListener('voiceschanged', loadVoices);
+      
+      // Also try loading immediately
+      if (speechSynthesis.getVoices().length > 0) {
+        loadVoices();
+      }
+    }
+  }, []);
 
   // Effect for the initial greeting. Runs only once on component mount.
   useEffect(() => {
@@ -75,14 +127,28 @@ export default function App() {
   const handleNewUserMessage = useCallback(async (englishText: string) => {
     if (!englishText.trim() || isLoading) return;
 
+    // Add user message immediately without waiting for translation
     const newUserMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       sender: MessageSender.USER,
       englishText: englishText,
+      japaneseText: undefined, // Will be added later
     };
 
     setMessages(prev => [...prev, newUserMessage]);
+    
+    // Translate in background and update message
+    translateUserMessage(englishText).then(japaneseTranslation => {
+      if (japaneseTranslation) {
+        setMessages(prev => prev.map(msg => 
+          msg.id === newUserMessage.id 
+            ? { ...msg, japaneseText: japaneseTranslation }
+            : msg
+        ));
+      }
+    });
     setIsLoading(true);
+    setShowSearchResults(false); // Hide old results on new message
 
     const currentHistory = [...messages, newUserMessage];
     const aiResponse = await getAIResponse(currentHistory, englishText, personality, topic);
@@ -93,24 +159,25 @@ export default function App() {
       englishText: aiResponse.english,
       japaneseText: aiResponse.japanese,
       replySuggestions: aiResponse.suggestions,
-      triggerSearch: aiResponse.triggerSearch,
     };
     
     setMessages(prev => [...prev, newAiMessage]);
-    
-    // If AI wants to trigger a web search, do it asynchronously
+
+    // If AI response triggers a search, start it asynchronously
     if (aiResponse.triggerSearch) {
-      setIsSearching(true);
-      setLastSearchQuery(englishText);
-      
-      // Perform search in background
-      getWebSearchResults(englishText).then(results => {
-        setSearchResults(results);
-        setIsSearching(false);
-        if (results.length > 0) {
-          setShowSearchResults(true);
-        }
-      });
+        setIsSearching(true);
+        // Don't await this, let it run in the background
+        getWebSearchResults(englishText).then(results => {
+            if (results.length > 0) {
+                setSearchResults(results);
+                setShowSearchResults(true);
+            }
+        }).catch(error => {
+            console.error("Web search failed:", error);
+            // Optionally, inform the user about the failure in a future update
+        }).finally(() => {
+            setIsSearching(false);
+        });
     }
     
     // After user's 3rd message (history length: AI, User, AI, User, AI, User = 6)
@@ -121,16 +188,17 @@ export default function App() {
     setIsLoading(false);
   }, [isLoading, messages, personality, topic, newsHeadlines]);
   
-  const handleSearchResultSelection = useCallback(async (result: SearchResult) => {
+  const handleArticleSelection = useCallback(async (article: NewsHeadline) => {
     if (isLoading) return;
 
     setIsLoading(true);
-    setShowSearchResults(false);
+    setShowNewsSelector(false); // Hide news selector
+    setShowSearchResults(false); // Hide search results selector
 
-    const response = await getGreetingForSearchResult(result, personality);
+    const response = await getGreetingForSelectedNews(article, personality);
 
-    const searchAiMessage: ChatMessage = {
-      id: `ai-search-${Date.now()}`,
+    const articleAiMessage: ChatMessage = {
+      id: `ai-article-${Date.now()}`,
       sender: MessageSender.AI,
       englishText: response.english,
       japaneseText: response.japanese,
@@ -138,117 +206,89 @@ export default function App() {
       source: response.source,
     };
 
-    setMessages(prev => [...prev, searchAiMessage]);
-    setSearchResults([]);
-    setIsLoading(false);
-  }, [isLoading, personality]);
-
-  const handleNewsSelection = useCallback(async (headline: NewsHeadline) => {
-    if (isLoading) return;
-
-    setIsLoading(true);
-    setShowNewsSelector(false); // Hide selector immediately
-
-    const response = await getGreetingForSelectedNews(headline, personality);
-
-    const newsAiMessage: ChatMessage = {
-      id: `ai-news-${Date.now()}`,
-      sender: MessageSender.AI,
-      englishText: response.english,
-      japaneseText: response.japanese,
-      replySuggestions: response.suggestions,
-      source: response.source,
-    };
-
-    setMessages(prev => [...prev, newsAiMessage]);
+    setMessages(prev => [...prev, articleAiMessage]);
     setNewsHeadlines([]); // Clear headlines so they don't appear again
     setIsLoading(false);
   }, [isLoading, personality]);
 
+  const handleAddCustomPersonality = (option: CustomOption) => {
+    setCustomPersonalities(prev => [...prev, option]);
+    setPersonality(option.value);
+  };
+
+  const handleAddCustomTopic = (option: CustomOption) => {
+    setCustomTopics(prev => [...prev, option]);
+    setTopic(option.value);
+  };
+
+  const handleDeleteCustomPersonality = (id: string) => {
+    setCustomPersonalities(prev => prev.filter(p => p.id !== id));
+  };
+
+  const handleDeleteCustomTopic = (id: string) => {
+    setCustomTopics(prev => prev.filter(t => t.id !== id));
+  };
+
   return (
-    <div className="h-screen bg-emerald-50 text-gray-800 font-sans flex flex-col p-4">
-      <main className="flex-grow flex flex-col md:flex-row gap-6 max-w-7xl w-full mx-auto overflow-y-hidden">
-        {/* Left Panel */}
-        <div className="w-full md:w-1/3 lg:w-1/4 flex-shrink-0 flex flex-col gap-4 overflow-y-auto pr-2 custom-scrollbar">
-          {/* App Info & Settings */}
+    <div className="h-screen font-sans flex flex-col p-3">
+      <main className="flex-grow flex flex-col gap-3 max-w-7xl w-full mx-auto overflow-y-hidden">
+        
+        {/* Header Section */}
+        <header className="flex-shrink-0 flex flex-col sm:flex-row justify-between items-center gap-2">
           <div>
-            <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-green-600">
+            <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-green-600">
               英会話バディ
             </h1>
-            <p className="text-gray-500 mb-6">AIと楽しく英会話を学ぼう</p>
-
-            <div className="space-y-4">
-                <div>
-                    <label htmlFor="personality-select" className="block text-sm font-medium text-gray-700 mb-1">AIの性格</label>
-                    <select
-                        id="personality-select"
-                        value={personality}
-                        onChange={(e) => setPersonality(e.target.value)}
-                        disabled={isLoading}
-                        className="w-full px-3 py-2 text-base text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 transition disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        aria-label="AIの性格を選択"
-                    >
-                        {personalityOptions.map(option => (
-                        <option key={option.value} value={option.value}>
-                            {option.label}
-                        </option>
-                        ))}
-                    </select>
-                </div>
-                <div>
-                    <label htmlFor="topic-select" className="block text-sm font-medium text-gray-700 mb-1">ニュースジャンル</label>
-                    <select
-                        id="topic-select"
-                        value={topic}
-                        onChange={(e) => setTopic(e.target.value)}
-                        disabled={isLoading}
-                        className="w-full px-3 py-2 text-base text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 transition disabled:bg-gray-100 disabled:cursor-not-allowed"
-                        aria-label="ニュースジャンルを選択"
-                    >
-                        {topicOptions.map(option => (
-                        <option key={option.value} value={option.value}>
-                            {option.label}
-                        </option>
-                        ))}
-                    </select>
-                </div>
-            </div>
+            <p className="text-gray-500 text-sm">あなたのAI英会話パートナー</p>
           </div>
-          
-          <VoiceInput onTranscriptReceived={handleNewUserMessage} disabled={isLoading} />
-          <Translator onSend={handleNewUserMessage} disabled={isLoading} />
-        </div>
-        {/* Right Panel - Fills remaining space and allows ChatArea to scroll internally */}
-        <div className="w-full md:w-2/3 lg:w-3/4 flex-1 flex flex-col min-h-0">
+          <button
+            onClick={() => setShowSettings(true)}
+            className="px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition flex items-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <span className="text-sm font-medium">設定</span>
+          </button>
+        </header>
+        
+        {/* Chat Area - Stretches to fill space */}
+        <div className="flex-1 min-h-0">
           <ChatArea 
             messages={messages} 
             isLoading={isLoading}
+            isSearching={isSearching}
             newsHeadlines={newsHeadlines}
             showNewsSelector={showNewsSelector}
-            onNewsSelect={handleNewsSelection}
-            isSearching={isSearching}
             searchResults={searchResults}
             showSearchResults={showSearchResults}
-            onSearchResultSelect={handleSearchResultSelection}
+            onArticleSelect={handleArticleSelection}
           />
         </div>
+
+        {/* Input Section */}
+        <footer className="flex-shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <VoiceInput onTranscriptReceived={handleNewUserMessage} disabled={isLoading || isSearching} />
+          <Translator onSend={handleNewUserMessage} disabled={isLoading || isSearching} />
+        </footer>
       </main>
-       <style>{`
-            .custom-scrollbar::-webkit-scrollbar {
-                width: 8px;
-            }
-            .custom-scrollbar::-webkit-scrollbar-track {
-                background: transparent;
-            }
-            .custom-scrollbar::-webkit-scrollbar-thumb {
-                background-color: #a3a3a3;
-                border-radius: 20px;
-                border: 2px solid #f0fdf4;
-            }
-             .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                background-color: #737373;
-            }
-        `}</style>
+      
+      {/* Settings Panel */}
+      <SettingsPanel
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        personality={personality}
+        topic={topic}
+        customPersonalities={customPersonalities}
+        customTopics={customTopics}
+        onPersonalityChange={setPersonality}
+        onTopicChange={setTopic}
+        onAddCustomPersonality={handleAddCustomPersonality}
+        onAddCustomTopic={handleAddCustomTopic}
+        onDeleteCustomPersonality={handleDeleteCustomPersonality}
+        onDeleteCustomTopic={handleDeleteCustomTopic}
+      />
     </div>
   );
 }
